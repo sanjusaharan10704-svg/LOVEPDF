@@ -304,9 +304,9 @@ const ToolPage = () => {
                   </div>
                 )}
                 {tool.engine === 'compress' && (
-                  <Field label="Target size">
+                  <Field label="Compress this PDF to (choose your target size)">
                     <div className="flex items-stretch gap-2">
-                      <input type="number" min="1" value={opts.targetVal} onChange={(e) => setOpts({ ...opts, targetVal: e.target.value })} className="input flex-1" />
+                      <input type="number" min="1" value={opts.targetVal} onChange={(e) => setOpts({ ...opts, targetVal: e.target.value })} className="input flex-1" placeholder="e.g. 50" />
                       <select value={opts.targetUnit} onChange={(e) => setOpts({ ...opts, targetUnit: e.target.value })} className="input w-24">
                         <option value="KB">KB</option>
                         <option value="MB">MB</option>
@@ -318,7 +318,7 @@ const ToolPage = () => {
                           className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${Number(opts.targetVal) === p.v && opts.targetUnit === p.u ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{p.v} {p.u}</button>
                       ))}
                     </div>
-                    <p className="hint">We'll try to bring your PDF at or below this size while keeping it readable. Great for scanned documents and forms.</p>
+                    <p className="hint">Enter the size you want (for example <b>50 KB</b>). We'll bring your PDF at or below it while keeping it readable — perfect for uploads with strict size limits.</p>
                   </Field>
                 )}
                 {tool.engine === 'pdf-to-jpg' && (

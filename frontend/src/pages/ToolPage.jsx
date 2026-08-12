@@ -1,0 +1,445 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { PDFDocument, degrees } from 'pdf-lib';
+import * as Icons from 'lucide-react';
+import { ChevronRight, X, ArrowUp, ArrowDown, RotateCw, Trash2, Download, Loader2, CheckCircle2, ArrowLeft, Sparkles } from 'lucide-react';
+import Header from '../components/Header';
+import Footer from '../components/Footer';
+import FileDrop from '../components/FileDrop';
+import { TOOLS, ICON_TILE } from '../mock';
+import * as pdf from '../lib/pdfUtils';
+
+const positions = [
+  { id: 'bottom-center', label: 'Bottom center' },
+  { id: 'bottom-left', label: 'Bottom left' },
+  { id: 'bottom-right', label: 'Bottom right' },
+  { id: 'top-center', label: 'Top center' },
+  { id: 'top-left', label: 'Top left' },
+  { id: 'top-right', label: 'Top right' },
+];
+
+const ToolPage = () => {
+  const { slug } = useParams();
+  const navigate = useNavigate();
+  const tool = useMemo(() => TOOLS.find((t) => t.slug === slug), [slug]);
+
+  const [files, setFiles] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null); // {name, bytes} | {parts:[]} | {images:[]}
+  const [thumbs, setThumbs] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [selected, setSelected] = useState(new Set());
+  const [order, setOrder] = useState([]);
+  const [rotations, setRotations] = useState({});
+  const [opts, setOpts] = useState({ ranges: '1', position: 'bottom-center', start: 1, wtext: 'CONFIDENTIAL', opacity: 0.25, angle: 90, quality: 2 });
+
+  useEffect(() => { window.scrollTo(0, 0); }, [slug]);
+  useEffect(() => { if (!tool) navigate('/'); }, [tool, navigate]);
+
+  const Icon = tool ? (Icons[tool.icon] || Icons.FileText) : Icons.FileText;
+  const isMulti = tool && ['merge', 'jpg-to-pdf'].includes(tool.engine);
+  const isImageInput = tool && tool.engine === 'jpg-to-pdf';
+  const needsThumbs = tool && ['organize', 'extract', 'remove'].includes(tool.engine);
+
+  const reset = () => { setResult(null); setError(''); };
+
+  const onFiles = async (list) => {
+    reset();
+    if (isMulti) {
+      setFiles((prev) => [...prev, ...list]);
+    } else {
+      const f = list[0];
+      setFiles([f]);
+      if (!isImageInput && needsThumbs) {
+        setBusy(true);
+        try {
+          const { thumbs: th, total: tt } = await pdf.renderThumbnails(f);
+          setThumbs(th); setTotal(tt);
+          setOrder(th.map((x) => x.index));
+          setSelected(new Set());
+          setRotations({});
+        } catch (e) { setError('Could not read this PDF. It may be encrypted or damaged.'); }
+        setBusy(false);
+      }
+    }
+  };
+
+  const move = (i, dir) => {
+    setFiles((prev) => {
+      const arr = [...prev];
+      const j = i + dir;
+      if (j < 0 || j >= arr.length) return arr;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      return arr;
+    });
+  };
+  const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
+
+  const toggleSelect = (idx) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.has(idx) ? n.delete(idx) : n.add(idx);
+      return n;
+    });
+  };
+
+  const moveThumb = (pos, dir) => {
+    setOrder((prev) => {
+      const arr = [...prev];
+      const j = pos + dir;
+      if (j < 0 || j >= arr.length) return arr;
+      [arr[pos], arr[j]] = [arr[j], arr[pos]];
+      return arr;
+    });
+  };
+  const rotateThumb = (idx) => setRotations((r) => ({ ...r, [idx]: ((r[idx] || 0) + 90) % 360 }));
+  const deleteThumb = (idx) => setOrder((prev) => prev.filter((x) => x !== idx));
+
+  const process = async () => {
+    reset();
+    if (!files.length) { setError('Please add a file first.'); return; }
+    setBusy(true);
+    try {
+      const base = files[0].name.replace(/\.[^.]+$/, '');
+      switch (tool.engine) {
+        case 'merge': {
+          const bytes = await pdf.mergePdfs(files);
+          setResult({ name: 'merged.pdf', bytes });
+          break;
+        }
+        case 'jpg-to-pdf': {
+          const bytes = await pdf.imagesToPdf(files);
+          setResult({ name: 'images.pdf', bytes });
+          break;
+        }
+        case 'split': {
+          const parts = await pdf.splitByRanges(files[0], opts.ranges);
+          if (!parts.length) throw new Error('No valid page ranges.');
+          setResult({ parts });
+          break;
+        }
+        case 'compress': {
+          const bytes = await pdf.compressPdf(files[0]);
+          setResult({ name: `${base}_compressed.pdf`, bytes });
+          break;
+        }
+        case 'rotate': {
+          const bytes = await pdf.rotatePdf(files[0], opts.angle);
+          setResult({ name: `${base}_rotated.pdf`, bytes });
+          break;
+        }
+        case 'extract': {
+          const idx = [...selected].sort((a, b) => a - b);
+          if (!idx.length) throw new Error('Select at least one page to extract.');
+          const bytes = await pdf.extractPages(files[0], idx);
+          setResult({ name: `${base}_extracted.pdf`, bytes });
+          break;
+        }
+        case 'remove': {
+          const idx = [...selected];
+          if (!idx.length) throw new Error('Select the pages you want to remove.');
+          const bytes = await pdf.removePages(files[0], idx);
+          setResult({ name: `${base}_edited.pdf`, bytes });
+          break;
+        }
+        case 'organize': {
+          const src = await PDFDocument.load(await pdf.readFile(files[0]), { ignoreEncryption: true });
+          const out = await PDFDocument.create();
+          const pages = await out.copyPages(src, order);
+          pages.forEach((p, i) => {
+            const rot = rotations[order[i]] || 0;
+            if (rot) p.setRotation(degrees(rot));
+            out.addPage(p);
+          });
+          setResult({ name: `${base}_organized.pdf`, bytes: await out.save() });
+          break;
+        }
+        case 'page-numbers': {
+          const bytes = await pdf.addPageNumbers(files[0], { position: opts.position, start: Number(opts.start) || 1 });
+          setResult({ name: `${base}_numbered.pdf`, bytes });
+          break;
+        }
+        case 'watermark': {
+          const bytes = await pdf.addWatermark(files[0], { text: opts.wtext || 'WATERMARK', opacity: Number(opts.opacity) });
+          setResult({ name: `${base}_watermarked.pdf`, bytes });
+          break;
+        }
+        case 'pdf-to-jpg': {
+          const images = await pdf.pdfToImages(files[0], { scale: Number(opts.quality) || 2 });
+          setResult({ images });
+          break;
+        }
+        default:
+          throw new Error('unsupported');
+      }
+    } catch (e) {
+      setError(e.message === 'unsupported' ? '' : (e.message || 'Something went wrong. Please try another file.'));
+    }
+    setBusy(false);
+  };
+
+  if (!tool) return null;
+
+  const relatedTools = TOOLS.filter((t) => t.slug !== slug && t.category === tool.category).slice(0, 4);
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-[#0a0d16] text-slate-900 dark:text-slate-100 transition-colors">
+      <Header />
+
+      <section className="relative overflow-hidden grid-hero border-b border-slate-200 dark:border-white/10">
+        <div className="absolute -top-24 right-0 w-96 h-96 rounded-full bg-rose-500/15 blur-[110px]" />
+        <div className="relative max-w-4xl mx-auto px-4 sm:px-6 pt-10 pb-8 text-center">
+          <div className="flex items-center justify-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 mb-6">
+            <Link to="/" className="hover:text-rose-500">Home</Link>
+            <ChevronRight className="w-4 h-4" />
+            <span className="text-slate-700 dark:text-slate-200 font-medium">{tool.name}</span>
+          </div>
+          <div className={`grid place-items-center w-16 h-16 mx-auto rounded-2xl ${ICON_TILE[tool.color] || ICON_TILE.rose}`}>
+            <Icon className="w-8 h-8" />
+          </div>
+          <h1 className="font-display font-extrabold text-3xl sm:text-4xl mt-5">{tool.name}</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-3 max-w-xl mx-auto leading-relaxed">{tool.desc}</p>
+        </div>
+      </section>
+
+      <section className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+        {!tool.ready ? (
+          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-10 text-center">
+            <div className="grid place-items-center w-14 h-14 mx-auto rounded-2xl bg-violet-500/10 text-violet-500"><Sparkles className="w-7 h-7" /></div>
+            <h3 className="font-display font-bold text-xl mt-5">Advanced engine coming soon</h3>
+            <p className="text-slate-500 dark:text-slate-400 mt-3 max-w-md mx-auto leading-relaxed">
+              {tool.name} needs server-side conversion which we're wiring up next. Meanwhile, try our instant browser tools — they work right now.
+            </p>
+            <button onClick={() => navigate('/#tools')} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-6 py-3 rounded-xl transition">
+              <ArrowLeft className="w-4 h-4" /> Browse working tools
+            </button>
+          </div>
+        ) : result ? (
+          <ResultView result={result} onReset={() => { setResult(null); setFiles([]); setThumbs([]); }} />
+        ) : (
+          <div className="space-y-6">
+            {files.length === 0 ? (
+              <FileDrop
+                accept={isImageInput ? 'image/*' : '.pdf'}
+                multiple={isMulti}
+                onFiles={onFiles}
+                label={isImageInput ? 'Select images' : (isMulti ? 'Select PDF files' : 'Select PDF file')}
+              />
+            ) : (
+              <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-5 sm:p-7 space-y-5">
+                {/* File list for multi tools */}
+                {isMulti && (
+                  <div className="space-y-2">
+                    {files.map((f, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] px-4 py-3">
+                        <Icons.FileText className="w-5 h-5 text-rose-500 shrink-0" />
+                        <span className="text-sm truncate flex-1">{f.name}</span>
+                        <span className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} KB</span>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => move(i, -1)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10"><ArrowUp className="w-4 h-4" /></button>
+                          <button onClick={() => move(i, 1)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10"><ArrowDown className="w-4 h-4" /></button>
+                          <button onClick={() => removeFile(i)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10"><X className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                    ))}
+                    <FileDrop accept={isImageInput ? 'image/*' : '.pdf'} multiple onFiles={onFiles} label="Add more" hint="drop to append" />
+                  </div>
+                )}
+
+                {/* Single file summary */}
+                {!isMulti && (
+                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] px-4 py-3">
+                    <Icons.FileText className="w-5 h-5 text-rose-500" />
+                    <span className="text-sm truncate flex-1">{files[0].name}</span>
+                    {total > 0 && <span className="text-xs text-slate-400">{total} pages</span>}
+                    <button onClick={() => { setFiles([]); setThumbs([]); }} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10"><X className="w-4 h-4" /></button>
+                  </div>
+                )}
+
+                {/* Options */}
+                {tool.engine === 'split' && (
+                  <Field label="Page ranges (comma separated groups)">
+                    <input value={opts.ranges} onChange={(e) => setOpts({ ...opts, ranges: e.target.value })}
+                      placeholder="e.g. 1-3, 4-6, 8" className="input" />
+                    <p className="hint">Each group becomes a separate PDF. Example: <b>1-3, 4-6</b> creates 2 files.</p>
+                  </Field>
+                )}
+                {tool.engine === 'rotate' && (
+                  <Field label="Rotation">
+                    <div className="flex gap-2">
+                      {[90, 180, 270].map((a) => (
+                        <button key={a} onClick={() => setOpts({ ...opts, angle: a })}
+                          className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${opts.angle === a ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{a}°</button>
+                      ))}
+                    </div>
+                  </Field>
+                )}
+                {tool.engine === 'page-numbers' && (
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <Field label="Position">
+                      <select value={opts.position} onChange={(e) => setOpts({ ...opts, position: e.target.value })} className="input">
+                        {positions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Start from">
+                      <input type="number" min="1" value={opts.start} onChange={(e) => setOpts({ ...opts, start: e.target.value })} className="input" />
+                    </Field>
+                  </div>
+                )}
+                {tool.engine === 'watermark' && (
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <Field label="Watermark text">
+                      <input value={opts.wtext} onChange={(e) => setOpts({ ...opts, wtext: e.target.value })} className="input" />
+                    </Field>
+                    <Field label={`Opacity: ${Math.round(opts.opacity * 100)}%`}>
+                      <input type="range" min="0.05" max="0.6" step="0.05" value={opts.opacity} onChange={(e) => setOpts({ ...opts, opacity: e.target.value })} className="w-full accent-rose-500" />
+                    </Field>
+                  </div>
+                )}
+                {tool.engine === 'pdf-to-jpg' && (
+                  <Field label="Image quality">
+                    <div className="flex gap-2">
+                      {[{ v: 1.5, l: 'Standard' }, { v: 2, l: 'High' }, { v: 3, l: 'Ultra' }].map((q) => (
+                        <button key={q.v} onClick={() => setOpts({ ...opts, quality: q.v })}
+                          className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${Number(opts.quality) === q.v ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{q.l}</button>
+                      ))}
+                    </div>
+                  </Field>
+                )}
+
+                {/* Thumbnail selection for extract/remove */}
+                {(tool.engine === 'extract' || tool.engine === 'remove') && thumbs.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-3">Click the pages to {tool.engine === 'extract' ? 'extract' : 'remove'} ({selected.size} selected)</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 max-h-96 overflow-y-auto pr-1">
+                      {thumbs.map((t) => (
+                        <button key={t.index} onClick={() => toggleSelect(t.index)}
+                          className={`relative rounded-lg overflow-hidden border-2 transition-all ${selected.has(t.index) ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/10'}`}>
+                          <img src={t.url} alt="" className="w-full" />
+                          <span className="absolute bottom-1 right-1 text-[10px] font-semibold bg-black/60 text-white px-1.5 rounded">{t.index + 1}</span>
+                          {selected.has(t.index) && <span className="absolute top-1 left-1 grid place-items-center w-5 h-5 rounded-full bg-rose-500 text-white"><CheckCircle2 className="w-3.5 h-3.5" /></span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Organize grid */}
+                {tool.engine === 'organize' && thumbs.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-3">Reorder, rotate or delete pages</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 max-h-[28rem] overflow-y-auto pr-1">
+                      {order.map((idx, pos) => {
+                        const th = thumbs.find((x) => x.index === idx);
+                        return (
+                          <div key={idx} className="relative rounded-lg overflow-hidden border-2 border-slate-200 dark:border-white/10 group">
+                            <img src={th?.url} alt="" className="w-full transition-transform" style={{ transform: `rotate(${rotations[idx] || 0}deg)` }} />
+                            <span className="absolute bottom-1 right-1 text-[10px] font-semibold bg-black/60 text-white px-1.5 rounded">{pos + 1}</span>
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                              <button onClick={() => moveThumb(pos, -1)} className="p-1.5 rounded bg-white/20 text-white hover:bg-white/30"><ArrowLeft className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => rotateThumb(idx)} className="p-1.5 rounded bg-white/20 text-white hover:bg-white/30"><RotateCw className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => deleteThumb(idx)} className="p-1.5 rounded bg-rose-500 text-white hover:bg-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => moveThumb(pos, 1)} className="p-1.5 rounded bg-white/20 text-white hover:bg-white/30"><Icons.ArrowRight className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {error && <p className="text-sm text-rose-500 font-medium">{error}</p>}
+
+                <button onClick={process} disabled={busy}
+                  className="w-full btn-primary text-white font-semibold py-4 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-70">
+                  {busy ? <><Loader2 className="w-5 h-5 animate-spin" /> Processing...</> : <><Icon className="w-5 h-5" /> {tool.name}</>}
+                </button>
+              </div>
+            )}
+
+            {busy && files.length === 0 && (
+              <div className="flex items-center justify-center gap-2 text-slate-500"><Loader2 className="w-5 h-5 animate-spin" /> Loading preview...</div>
+            )}
+          </div>
+        )}
+
+        {/* Related */}
+        {relatedTools.length > 0 && (
+          <div className="mt-14">
+            <h3 className="font-display font-semibold text-lg mb-4">You might also need</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {relatedTools.map((t) => {
+                const RI = Icons[t.icon] || Icons.FileText;
+                return (
+                  <Link key={t.slug} to={`/tool/${t.slug}`} className="card-hover flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-3">
+                    <span className={`grid place-items-center w-9 h-9 rounded-lg ${ICON_TILE[t.color]}`}><RI className="w-4.5 h-4.5" /></span>
+                    <span className="text-sm font-medium">{t.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <Footer />
+    </div>
+  );
+};
+
+const Field = ({ label, children }) => (
+  <div>
+    <label className="block text-sm font-medium mb-2">{label}</label>
+    {children}
+  </div>
+);
+
+const ResultView = ({ result, onReset }) => {
+  const isImages = !!result.images;
+  const isParts = !!result.parts;
+  const downloadAllImages = () => result.images.forEach((im) => pdf.download(im.blob, im.name, 'image/jpeg'));
+  return (
+    <div className="rounded-3xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-500/[0.06] p-8 text-center">
+      <div className="grid place-items-center w-14 h-14 mx-auto rounded-2xl bg-emerald-500/15 text-emerald-500"><CheckCircle2 className="w-8 h-8" /></div>
+      <h3 className="font-display font-bold text-2xl mt-5">All done!</h3>
+      <p className="text-slate-500 dark:text-slate-400 mt-2">Your file is ready to download.</p>
+
+      {!isImages && !isParts && (
+        <button onClick={() => pdf.download(result.bytes, result.name)} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-7 py-3.5 rounded-xl transition">
+          <Download className="w-5 h-5" /> Download {result.name}
+        </button>
+      )}
+
+      {isParts && (
+        <div className="mt-6 space-y-2 max-w-md mx-auto">
+          {result.parts.map((p) => (
+            <button key={p.name} onClick={() => pdf.download(p.bytes, p.name)} className="w-full flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] px-4 py-3 hover:border-rose-300 transition-colors">
+              <span className="text-sm truncate">{p.name}</span>
+              <Download className="w-4 h-4 text-rose-500" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isImages && (
+        <>
+          <button onClick={downloadAllImages} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-7 py-3.5 rounded-xl transition">
+            <Download className="w-5 h-5" /> Download all {result.images.length} images
+          </button>
+          <div className="mt-6 grid grid-cols-3 sm:grid-cols-5 gap-3">
+            {result.images.map((im) => (
+              <button key={im.name} onClick={() => pdf.download(im.blob, im.name, 'image/jpeg')} className="rounded-lg overflow-hidden border border-slate-200 dark:border-white/10 hover:border-rose-300 transition-colors">
+                <img src={im.url} alt={im.name} className="w-full" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <button onClick={onReset} className="mt-6 block mx-auto text-sm font-semibold text-slate-500 hover:text-rose-500 transition-colors">Start over</button>
+    </div>
+  );
+};
+
+export default ToolPage;

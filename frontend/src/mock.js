@@ -91,3 +91,31 @@ export const ICON_TILE = {
   cyan: 'bg-cyan-500/12 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-400',
   slate: 'bg-slate-500/12 text-slate-600 dark:bg-slate-400/15 dark:text-slate-300',
 };
+
+
+// Server-side tools: engine -> { endpoint, accept, output, kind, fields }
+// kind: 'file' (single upload), 'html' (url/html input), 'compare' (two files)
+export const SERVER_TOOLS = {
+  'word-to-pdf': { endpoint: 'office-to-pdf', accept: '.doc,.docx,.odt,.rtf,.txt', kind: 'file' },
+  'excel-to-pdf': { endpoint: 'office-to-pdf', accept: '.xls,.xlsx,.ods,.csv', kind: 'file' },
+  'ppt-to-pdf': { endpoint: 'office-to-pdf', accept: '.ppt,.pptx,.odp', kind: 'file' },
+  'pdf-to-word': { endpoint: 'pdf-to-word', accept: '.pdf', kind: 'file' },
+  'pdf-to-excel': { endpoint: 'pdf-to-excel', accept: '.pdf', kind: 'file' },
+  'pdf-to-ppt': { endpoint: 'pdf-to-ppt', accept: '.pdf', kind: 'file' },
+  'html-to-pdf': { endpoint: 'html-to-pdf', kind: 'html' },
+  'ocr-pdf': { endpoint: 'ocr', accept: '.pdf', kind: 'file', fields: ['lang'] },
+  'protect-pdf': { endpoint: 'protect', accept: '.pdf', kind: 'file', fields: ['password'] },
+  'unlock-pdf': { endpoint: 'unlock', accept: '.pdf', kind: 'file', fields: ['password'] },
+  'repair-pdf': { endpoint: 'repair', accept: '.pdf', kind: 'file' },
+  'pdf-to-pdfa': { endpoint: 'pdfa', accept: '.pdf', kind: 'file' },
+  'crop-pdf': { endpoint: 'crop', accept: '.pdf', kind: 'file', fields: ['margin'] },
+  'compare-pdf': { endpoint: 'compare', accept: '.pdf', kind: 'compare' },
+};
+
+export const OCR_LANGS = [
+  { id: 'eng', label: 'English' },
+  { id: 'hin', label: 'Hindi' },
+  { id: 'fra', label: 'French' },
+  { id: 'deu', label: 'German' },
+  { id: 'spa', label: 'Spanish' },
+];

@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as Icons from 'lucide-react';
-import { ICON_TILE } from '../mock';
+import { ICON_TILE, SERVER_TOOLS } from '../mock';
 
 const ToolCard = ({ tool, index = 0 }) => {
   const navigate = useNavigate();
   const Icon = Icons[tool.icon] || Icons.FileText;
+  const isReady = tool.ready || !!SERVER_TOOLS[tool.slug];
   return (
     <button
       onClick={() => navigate(`/tool/${tool.slug}`)}
@@ -17,7 +18,7 @@ const ToolCard = ({ tool, index = 0 }) => {
       </div>
       <h3 className="mt-4 font-display font-semibold text-slate-900 dark:text-white flex items-center gap-2">
         {tool.name}
-        {!tool.ready && (
+        {!isReady && (
           <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">soon</span>
         )}
       </h3>

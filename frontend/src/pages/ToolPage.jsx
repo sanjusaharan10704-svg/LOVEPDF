@@ -6,8 +6,10 @@ import { ChevronRight, X, ArrowUp, ArrowDown, RotateCw, Trash2, Download, Loader
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import FileDrop from '../components/FileDrop';
-import { TOOLS, ICON_TILE } from '../mock';
+import { TOOLS, ICON_TILE, SERVER_TOOLS, OCR_LANGS } from '../mock';
 import * as pdf from '../lib/pdfUtils';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api/pdf`;
 
 const positions = [
   { id: 'bottom-center', label: 'Bottom center' },
@@ -33,7 +35,10 @@ const ToolPage = () => {
   const [order, setOrder] = useState([]);
   const [rotations, setRotations] = useState({});
   const [progress, setProgress] = useState(0);
-  const [opts, setOpts] = useState({ ranges: '1', position: 'bottom-center', start: 1, wtext: 'CONFIDENTIAL', opacity: 0.25, angle: 90, quality: 2, targetVal: 200, targetUnit: 'KB' });
+  const [opts, setOpts] = useState({ ranges: '1', position: 'bottom-center', start: 1, wtext: 'CONFIDENTIAL', opacity: 0.25, angle: 90, quality: 2, targetVal: 200, targetUnit: 'KB', password: '', lang: 'eng', margin: 5, url: '', html: '' });
+  const [file2, setFile2] = useState(null);
+
+  const serverCfg = SERVER_TOOLS[slug];
 
   useEffect(() => { window.scrollTo(0, 0); }, [slug]);
   useEffect(() => { if (!tool) navigate('/'); }, [tool, navigate]);
@@ -187,6 +192,51 @@ const ToolPage = () => {
 
   if (!tool) return null;
 
+  const serverProcess = async () => {
+    reset();
+    setBusy(true);
+    setProgress(0);
+    try {
+      const fd = new FormData();
+      if (serverCfg.kind === 'html') {
+        if (!opts.url && !opts.html) throw new Error('Enter a URL or paste HTML content.');
+        if (opts.url) fd.append('url', opts.url);
+        if (opts.html) fd.append('html', opts.html);
+      } else if (serverCfg.kind === 'compare') {
+        if (!files[0] || !file2) throw new Error('Please add both PDF files to compare.');
+        fd.append('file1', files[0]);
+        fd.append('file2', file2);
+      } else {
+        if (!files[0]) throw new Error('Please add a file first.');
+        fd.append('file', files[0]);
+      }
+      (serverCfg.fields || []).forEach((f) => {
+        if (f === 'password' && !opts.password && slug === 'protect-pdf') throw new Error('Please set a password.');
+        fd.append(f, opts[f]);
+      });
+
+      const res = await fetch(`${API}/${serverCfg.endpoint}`, { method: 'POST', body: fd });
+      if (!res.ok) {
+        let msg = 'Processing failed. Please try another file.';
+        try { const j = await res.json(); msg = j.detail || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      if (serverCfg.kind === 'compare') {
+        const data = await res.json();
+        setResult({ compare: data });
+      } else {
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/);
+        const name = m ? m[1] : 'result';
+        setResult({ blob, name });
+      }
+    } catch (e) {
+      setError(e.message || 'Something went wrong.');
+    }
+    setBusy(false);
+  };
+
   const relatedTools = TOOLS.filter((t) => t.slug !== slug && t.category === tool.category).slice(0, 4);
 
   return (
@@ -210,27 +260,62 @@ const ToolPage = () => {
       </section>
 
       <section className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
-        {!tool.ready ? (
+        {(!tool.ready && !serverCfg) ? (
           <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-10 text-center">
             <div className="grid place-items-center w-14 h-14 mx-auto rounded-2xl bg-violet-500/10 text-violet-500"><Sparkles className="w-7 h-7" /></div>
             <h3 className="font-display font-bold text-xl mt-5">Advanced engine coming soon</h3>
             <p className="text-slate-500 dark:text-slate-400 mt-3 max-w-md mx-auto leading-relaxed">
-              {tool.name} needs server-side conversion which we're wiring up next. Meanwhile, try our instant browser tools — they work right now.
+              {tool.name} needs an editor experience we're wiring up next. Meanwhile, try our other tools — they work right now.
             </p>
             <button onClick={() => navigate('/#tools')} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-6 py-3 rounded-xl transition">
               <ArrowLeft className="w-4 h-4" /> Browse working tools
             </button>
           </div>
         ) : result ? (
-          <ResultView result={result} onReset={() => { setResult(null); setFiles([]); setThumbs([]); }} />
+          <ResultView result={result} onReset={() => { setResult(null); setFiles([]); setFile2(null); setThumbs([]); }} />
+        ) : (serverCfg && serverCfg.kind === 'html') ? (
+          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-5 sm:p-7 space-y-5">
+            <Field label="Webpage URL">
+              <input value={opts.url} onChange={(e) => setOpts({ ...opts, url: e.target.value })} placeholder="https://example.com" className="input" />
+            </Field>
+            <div className="text-center text-xs text-slate-400 font-semibold">— OR —</div>
+            <Field label="Paste HTML code">
+              <textarea value={opts.html} onChange={(e) => setOpts({ ...opts, html: e.target.value })} rows={6} placeholder="<h1>Hello</h1>" className="input font-mono text-xs" />
+            </Field>
+            {error && <p className="text-sm text-rose-500 font-medium">{error}</p>}
+            <button onClick={serverProcess} disabled={busy} className="w-full btn-primary text-white font-semibold py-4 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-70">
+              {busy ? <><Loader2 className="w-5 h-5 animate-spin" /> Converting...</> : <><Icon className="w-5 h-5" /> Convert to PDF</>}
+            </button>
+          </div>
+        ) : (serverCfg && serverCfg.kind === 'compare') ? (
+          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-5 sm:p-7 space-y-5">
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm font-medium mb-2">Original PDF</p>
+                {files[0] ? (
+                  <FileChip name={files[0].name} onRemove={() => setFiles([])} />
+                ) : <FileDrop accept=".pdf" multiple={false} onFiles={(l) => setFiles([l[0]])} label="Select PDF" />}
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-2">Changed PDF</p>
+                {file2 ? (
+                  <FileChip name={file2.name} onRemove={() => setFile2(null)} />
+                ) : <FileDrop accept=".pdf" multiple={false} onFiles={(l) => setFile2(l[0])} label="Select PDF" />}
+              </div>
+            </div>
+            {error && <p className="text-sm text-rose-500 font-medium">{error}</p>}
+            <button onClick={serverProcess} disabled={busy} className="w-full btn-primary text-white font-semibold py-4 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-70">
+              {busy ? <><Loader2 className="w-5 h-5 animate-spin" /> Comparing...</> : <><Icon className="w-5 h-5" /> Compare PDFs</>}
+            </button>
+          </div>
         ) : (
           <div className="space-y-6">
             {files.length === 0 ? (
               <FileDrop
-                accept={isImageInput ? 'image/*' : '.pdf'}
+                accept={serverCfg ? serverCfg.accept : (isImageInput ? 'image/*' : '.pdf')}
                 multiple={isMulti}
                 onFiles={onFiles}
-                label={isImageInput ? 'Select images' : (isMulti ? 'Select PDF files' : 'Select PDF file')}
+                label={isImageInput ? 'Select images' : (isMulti ? 'Select PDF files' : (serverCfg && serverCfg.accept !== '.pdf' ? 'Select file' : 'Select PDF file'))}
               />
             ) : (
               <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-5 sm:p-7 space-y-5">
@@ -332,6 +417,24 @@ const ToolPage = () => {
                   </Field>
                 )}
 
+                {serverCfg && (serverCfg.fields || []).includes('password') && (
+                  <Field label={slug === 'unlock-pdf' ? 'PDF password (leave blank if none)' : 'Set a password'}>
+                    <input type="password" value={opts.password} onChange={(e) => setOpts({ ...opts, password: e.target.value })} placeholder="Enter password" className="input" />
+                  </Field>
+                )}
+                {serverCfg && (serverCfg.fields || []).includes('lang') && (
+                  <Field label="Document language (for OCR)">
+                    <select value={opts.lang} onChange={(e) => setOpts({ ...opts, lang: e.target.value })} className="input">
+                      {OCR_LANGS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                    </select>
+                  </Field>
+                )}
+                {serverCfg && (serverCfg.fields || []).includes('margin') && (
+                  <Field label={`Crop margin: ${opts.margin}%`}>
+                    <input type="range" min="1" max="40" step="1" value={opts.margin} onChange={(e) => setOpts({ ...opts, margin: e.target.value })} className="w-full accent-rose-500" />
+                  </Field>
+                )}
+
                 {/* Thumbnail selection for extract/remove */}
                 {(tool.engine === 'extract' || tool.engine === 'remove') && thumbs.length > 0 && (
                   <div>
@@ -386,7 +489,13 @@ const ToolPage = () => {
                   </div>
                 )}
 
-                <button onClick={process} disabled={busy}
+                {busy && serverCfg && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Working on the server, this can take a few moments…
+                  </div>
+                )}
+
+                <button onClick={serverCfg ? serverProcess : process} disabled={busy}
                   className="w-full btn-primary text-white font-semibold py-4 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-70">
                   {busy ? <><Loader2 className="w-5 h-5 animate-spin" /> Processing...</> : <><Icon className="w-5 h-5" /> {tool.name}</>}
                 </button>
@@ -430,12 +539,45 @@ const Field = ({ label, children }) => (
   </div>
 );
 
+const FileChip = ({ name, onRemove }) => (
+  <div className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] px-4 py-3">
+    <Icons.FileText className="w-5 h-5 text-rose-500" />
+    <span className="text-sm truncate flex-1">{name}</span>
+    <button onClick={onRemove} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10"><X className="w-4 h-4" /></button>
+  </div>
+);
+
 const ResultView = ({ result, onReset }) => {
   const isImages = !!result.images;
   const isParts = !!result.parts;
+  const isBlob = !!result.blob;
+  const isCompare = !!result.compare;
   const meta = result.meta;
   const fmt = (b) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(2)} MB` : `${(b / 1024).toFixed(0)} KB`);
   const downloadAllImages = () => result.images.forEach((im) => pdf.download(im.blob, im.name, 'image/jpeg'));
+
+  if (isCompare) {
+    const { similarity, rows } = result.compare;
+    return (
+      <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-6 sm:p-8">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+          <h3 className="font-display font-bold text-xl">Comparison result</h3>
+          <span className="text-sm font-semibold px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">{similarity}% similar</span>
+        </div>
+        <div className="max-h-[28rem] overflow-y-auto rounded-xl border border-slate-200 dark:border-white/10 divide-y divide-slate-100 dark:divide-white/5 text-sm font-mono">
+          {rows.length === 0 && <p className="p-4 text-slate-500">No extractable text found in these PDFs.</p>}
+          {rows.map((r, i) => (
+            <div key={i} className={`px-4 py-1.5 flex gap-2 ${r.type === 'added' ? 'bg-emerald-500/10' : r.type === 'removed' ? 'bg-rose-500/10' : ''}`}>
+              <span className={`select-none w-4 ${r.type === 'added' ? 'text-emerald-500' : r.type === 'removed' ? 'text-rose-500' : 'text-slate-300 dark:text-slate-600'}`}>{r.type === 'added' ? '+' : r.type === 'removed' ? '−' : ''}</span>
+              <span className="whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">{r.text || ' '}</span>
+            </div>
+          ))}
+        </div>
+        <button onClick={onReset} className="mt-6 block mx-auto text-sm font-semibold text-slate-500 hover:text-rose-500 transition-colors">Compare other files</button>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-3xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-500/[0.06] p-8 text-center">
       <div className="grid place-items-center w-14 h-14 mx-auto rounded-2xl bg-emerald-500/15 text-emerald-500"><CheckCircle2 className="w-8 h-8" /></div>
@@ -453,7 +595,13 @@ const ResultView = ({ result, onReset }) => {
         </div>
       )}
 
-      {!isImages && !isParts && (
+      {isBlob && (
+        <button onClick={() => pdf.download(result.blob, result.name, result.blob.type)} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-7 py-3.5 rounded-xl transition">
+          <Download className="w-5 h-5" /> Download {result.name}
+        </button>
+      )}
+
+      {!isImages && !isParts && !isBlob && (
         <button onClick={() => pdf.download(result.bytes, result.name)} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-7 py-3.5 rounded-xl transition">
           <Download className="w-5 h-5" /> Download {result.name}
         </button>

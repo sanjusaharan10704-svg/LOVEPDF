@@ -69,6 +69,10 @@ async def get_status_checks():
 # Include the router in the main app
 app.include_router(api_router)
 
+# Include PDF tools router (server-side conversions & security)
+from pdf_tools import router as pdf_router
+app.include_router(pdf_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

@@ -32,7 +32,8 @@ const ToolPage = () => {
   const [selected, setSelected] = useState(new Set());
   const [order, setOrder] = useState([]);
   const [rotations, setRotations] = useState({});
-  const [opts, setOpts] = useState({ ranges: '1', position: 'bottom-center', start: 1, wtext: 'CONFIDENTIAL', opacity: 0.25, angle: 90, quality: 2 });
+  const [progress, setProgress] = useState(0);
+  const [opts, setOpts] = useState({ ranges: '1', position: 'bottom-center', start: 1, wtext: 'CONFIDENTIAL', opacity: 0.25, angle: 90, quality: 2, targetVal: 200, targetUnit: 'KB' });
 
   useEffect(() => { window.scrollTo(0, 0); }, [slug]);
   useEffect(() => { if (!tool) navigate('/'); }, [tool, navigate]);
@@ -120,8 +121,13 @@ const ToolPage = () => {
           break;
         }
         case 'compress': {
-          const bytes = await pdf.compressPdf(files[0]);
-          setResult({ name: `${base}_compressed.pdf`, bytes });
+          const orig = files[0].size;
+          const mult = opts.targetUnit === 'MB' ? 1024 * 1024 : 1024;
+          const target = Math.max(1, Number(opts.targetVal) || 0) * mult;
+          setProgress(1);
+          const { bytes, size } = await pdf.compressToTarget(files[0], target, { onProgress: (p) => setProgress(p) });
+          setResult({ name: `${base}_compressed.pdf`, bytes, meta: { orig, size, target } });
+          setProgress(0);
           break;
         }
         case 'rotate': {
@@ -297,6 +303,24 @@ const ToolPage = () => {
                     </Field>
                   </div>
                 )}
+                {tool.engine === 'compress' && (
+                  <Field label="Target size">
+                    <div className="flex items-stretch gap-2">
+                      <input type="number" min="1" value={opts.targetVal} onChange={(e) => setOpts({ ...opts, targetVal: e.target.value })} className="input flex-1" />
+                      <select value={opts.targetUnit} onChange={(e) => setOpts({ ...opts, targetUnit: e.target.value })} className="input w-24">
+                        <option value="KB">KB</option>
+                        <option value="MB">MB</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {[{ v: 50, u: 'KB' }, { v: 100, u: 'KB' }, { v: 200, u: 'KB' }, { v: 500, u: 'KB' }, { v: 1, u: 'MB' }, { v: 2, u: 'MB' }].map((p) => (
+                        <button key={`${p.v}${p.u}`} onClick={() => setOpts({ ...opts, targetVal: p.v, targetUnit: p.u })}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${Number(opts.targetVal) === p.v && opts.targetUnit === p.u ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{p.v} {p.u}</button>
+                      ))}
+                    </div>
+                    <p className="hint">We'll try to bring your PDF at or below this size while keeping it readable. Great for scanned documents and forms.</p>
+                  </Field>
+                )}
                 {tool.engine === 'pdf-to-jpg' && (
                   <Field label="Image quality">
                     <div className="flex gap-2">
@@ -351,6 +375,17 @@ const ToolPage = () => {
 
                 {error && <p className="text-sm text-rose-500 font-medium">{error}</p>}
 
+                {busy && tool.engine === 'compress' && progress > 0 && (
+                  <div>
+                    <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                      <span>Compressing…</span><span>{Math.round(progress)}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-200 dark:bg-white/10 overflow-hidden">
+                      <div className="h-full btn-primary rounded-full transition-all" style={{ width: `${progress}%` }} />
+                    </div>
+                  </div>
+                )}
+
                 <button onClick={process} disabled={busy}
                   className="w-full btn-primary text-white font-semibold py-4 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-70">
                   {busy ? <><Loader2 className="w-5 h-5 animate-spin" /> Processing...</> : <><Icon className="w-5 h-5" /> {tool.name}</>}
@@ -398,12 +433,25 @@ const Field = ({ label, children }) => (
 const ResultView = ({ result, onReset }) => {
   const isImages = !!result.images;
   const isParts = !!result.parts;
+  const meta = result.meta;
+  const fmt = (b) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(2)} MB` : `${(b / 1024).toFixed(0)} KB`);
   const downloadAllImages = () => result.images.forEach((im) => pdf.download(im.blob, im.name, 'image/jpeg'));
   return (
     <div className="rounded-3xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-500/[0.06] p-8 text-center">
       <div className="grid place-items-center w-14 h-14 mx-auto rounded-2xl bg-emerald-500/15 text-emerald-500"><CheckCircle2 className="w-8 h-8" /></div>
       <h3 className="font-display font-bold text-2xl mt-5">All done!</h3>
       <p className="text-slate-500 dark:text-slate-400 mt-2">Your file is ready to download.</p>
+
+      {meta && (
+        <div className="mt-4 inline-flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] px-4 py-2.5 text-sm">
+          <span className="text-slate-500 dark:text-slate-400 line-through">{fmt(meta.orig)}</span>
+          <Icons.ArrowRight className="w-4 h-4 text-emerald-500" />
+          <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmt(meta.size)}</span>
+          {meta.orig > meta.size && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">-{Math.round((1 - meta.size / meta.orig) * 100)}%</span>
+          )}
+        </div>
+      )}
 
       {!isImages && !isParts && (
         <button onClick={() => pdf.download(result.bytes, result.name)} className="mt-6 inline-flex items-center gap-2 btn-primary text-white font-semibold px-7 py-3.5 rounded-xl transition">

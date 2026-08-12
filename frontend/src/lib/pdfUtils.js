@@ -225,3 +225,89 @@ export const compressPdf = async (file) => {
   const doc = await PDFDocument.load(await readFile(file), { ignoreEncryption: true });
   return doc.save({ useObjectStreams: true });
 };
+
+// Render all pages once to canvases (kept in memory for re-encoding).
+const renderPageCanvases = async (data, baseScale, onProgress) => {
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const canvases = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const vp1 = page.getViewport({ scale: 1 }); // points (72dpi)
+    const vp = page.getViewport({ scale: baseScale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vp.width);
+    canvas.height = Math.ceil(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    canvases.push({ canvas, ptW: vp1.width, ptH: vp1.height });
+    if (onProgress) onProgress(Math.round((n / pdf.numPages) * 40));
+  }
+  return canvases;
+};
+
+const buildRasterPdf = async (canvases, scaleFactor, quality) => {
+  const out = await PDFDocument.create();
+  for (const c of canvases) {
+    let src = c.canvas;
+    if (scaleFactor < 0.999) {
+      const tmp = document.createElement('canvas');
+      tmp.width = Math.max(1, Math.round(c.canvas.width * scaleFactor));
+      tmp.height = Math.max(1, Math.round(c.canvas.height * scaleFactor));
+      const tctx = tmp.getContext('2d');
+      tctx.fillStyle = '#ffffff';
+      tctx.fillRect(0, 0, tmp.width, tmp.height);
+      tctx.drawImage(c.canvas, 0, 0, tmp.width, tmp.height);
+      src = tmp;
+    }
+    const blob = await new Promise((r) => src.toBlob(r, 'image/jpeg', quality));
+    const buf = await blob.arrayBuffer();
+    const img = await out.embedJpg(buf);
+    const page = out.addPage([c.ptW, c.ptH]);
+    page.drawImage(img, { x: 0, y: 0, width: c.ptW, height: c.ptH });
+  }
+  return out.save({ useObjectStreams: true });
+};
+
+// Compress a PDF trying to land at or below targetBytes. Returns { bytes, size }.
+export const compressToTarget = async (file, targetBytes, { onProgress } = {}) => {
+  const data = await readFile(file);
+  // First, a cheap lossless re-save. If it already meets the target, use it.
+  const lossless = await compressPdf(file);
+  if (targetBytes && lossless.length <= targetBytes) {
+    return { bytes: lossless, size: lossless.length };
+  }
+
+  const canvases = await renderPageCanvases(data, 2.0, onProgress);
+  const scales = [1, 0.8, 0.62, 0.48, 0.36, 0.26];
+  let best = null; // best <= target (highest quality)
+  let smallest = null; // fallback: smallest overall
+
+  const track = (bytes) => {
+    if (!smallest || bytes.length < smallest.length) smallest = bytes;
+  };
+
+  outer: for (let si = 0; si < scales.length; si++) {
+    const sf = scales[si];
+    let lo = 0.28, hi = 0.9, found = null;
+    for (let it = 0; it < 6; it++) {
+      const q = (lo + hi) / 2;
+      const bytes = await buildRasterPdf(canvases, sf, q);
+      track(bytes);
+      if (onProgress) onProgress(40 + Math.min(55, si * 9 + it * 1.5));
+      if (!targetBytes || bytes.length <= targetBytes) {
+        found = bytes; // meets target, try higher quality
+        lo = q;
+      } else {
+        hi = q; // too big, lower quality
+      }
+    }
+    if (found) { best = found; break outer; }
+    // if even lowest quality at this scale is over target, go smaller scale
+  }
+
+  if (onProgress) onProgress(100);
+  const chosen = best || smallest || lossless;
+  return { bytes: chosen, size: chosen.length };
+};

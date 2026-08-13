@@ -33,7 +33,7 @@ export const TOOLS = [
   { slug: 'ppt-to-pdf', name: 'PowerPoint to PDF', desc: 'Convert PPT and PPTX slide decks into PDF files.', icon: 'Presentation', color: 'orange', category: 'convert-to', engine: 'ppt-to-pdf', ready: false },
   { slug: 'pdf-to-ppt', name: 'PDF to PowerPoint', desc: 'Turn a PDF into an editable PowerPoint presentation.', icon: 'MonitorPlay', color: 'orange', category: 'convert-from', engine: 'pdf-to-ppt', ready: false },
   { slug: 'html-to-pdf', name: 'HTML to PDF', desc: 'Convert any webpage or HTML into a clean PDF file.', icon: 'Code2', color: 'cyan', category: 'convert-to', engine: 'html-to-pdf', ready: false },
-  { slug: 'sign-pdf', name: 'Sign PDF', desc: 'Draw and place your signature onto any PDF document.', icon: 'PenTool', color: 'violet', category: 'edit', engine: 'sign', ready: false },
+  { slug: 'sign-pdf', name: 'Sign PDF', desc: 'Draw or type your signature and place it anywhere on your PDF.', icon: 'PenTool', color: 'violet', category: 'edit', engine: 'sign', ready: true },
   { slug: 'ocr-pdf', name: 'OCR PDF', desc: 'Make scanned PDFs searchable and selectable with OCR.', icon: 'ScanText', color: 'fuchsia', category: 'convert-from', engine: 'ocr', ready: false },
   { slug: 'repair-pdf', name: 'Repair PDF', desc: 'Recover data from a damaged or corrupted PDF file.', icon: 'Wrench', color: 'amber', category: 'optimize', engine: 'repair', ready: false },
   { slug: 'crop-pdf', name: 'Crop PDF', desc: 'Trim margins and crop the visible area of your pages.', icon: 'Crop', color: 'teal', category: 'edit', engine: 'crop', ready: false },

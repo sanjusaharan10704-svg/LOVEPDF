@@ -220,6 +220,49 @@ export const addWatermark = async (file, { text = 'CONFIDENTIAL', size = 48, opa
   return doc.save();
 };
 
+// Render a single page to a data URL at a target preview width (px).
+// Returns pt dimensions so callers can map overlay coordinates back to PDF space.
+export const renderPageImage = async (file, pageIndex = 0, previewWidth = 640) => {
+  const data = await readFile(file);
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const page = await pdf.getPage(pageIndex + 1);
+  const vp1 = page.getViewport({ scale: 1 });
+  const scale = previewWidth / vp1.width;
+  const vp = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(vp.width);
+  canvas.height = Math.ceil(vp.height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', 0.85),
+    ptW: vp1.width,
+    ptH: vp1.height,
+    pxW: canvas.width,
+    pxH: canvas.height,
+    total: pdf.numPages,
+  };
+};
+
+// Embed a PNG signature (data URL) onto one page at preview-space coordinates.
+export const placeSignature = async (file, { pageIndex, sigPngDataUrl, box, preview }) => {
+  const bytes = await readFile(file);
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const png = await doc.embedPng(sigPngDataUrl);
+  const page = doc.getPages()[pageIndex];
+  const { width: ptW, height: ptH } = page.getSize();
+  const sx = ptW / preview.pxW; // pt per preview px
+  const sy = ptH / preview.pxH;
+  const x = box.x * sx;
+  const w = box.w * sx;
+  const h = box.h * sy;
+  const y = ptH - (box.y + box.h) * sy;
+  page.drawImage(png, { x, y, width: w, height: h });
+  return doc.save();
+};
+
 // Lightweight "compress": re-save with object streams. Real gains vary by source.
 export const compressPdf = async (file) => {
   const doc = await PDFDocument.load(await readFile(file), { ignoreEncryption: true });

@@ -33,10 +33,11 @@ const Home = () => {
       <Header />
 
       {/* HERO */}
-      <section className="relative overflow-hidden grid-hero">
-        <div className="absolute -top-24 -left-24 w-[38rem] h-[38rem] rounded-full bg-rose-500/20 blur-[120px] animate-glow" />
-        <div className="absolute -bottom-40 -right-24 w-[34rem] h-[34rem] rounded-full bg-violet-500/15 blur-[120px]" />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-16 pb-14 sm:pt-24 sm:pb-20">
+      <section className="relative overflow-hidden grid-hero grain">
+        <div className="absolute -top-24 -left-24 w-[38rem] h-[38rem] rounded-full bg-rose-500/20 blur-[120px] aurora-blob" />
+        <div className="absolute top-10 right-0 w-[26rem] h-[26rem] rounded-full bg-amber-400/10 blur-[120px] aurora-blob" style={{ animationDelay: '3s' }} />
+        <div className="absolute -bottom-40 -right-24 w-[34rem] h-[34rem] rounded-full bg-violet-500/15 blur-[120px] aurora-blob" style={{ animationDelay: '6s' }} />
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-16 pb-14 sm:pt-24 sm:pb-20">
           <div className="max-w-3xl mx-auto text-center">
             <div className="reveal inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-white/10 bg-white/70 dark:bg-white/5 px-3.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> 26 tools · free · private in your browser
@@ -57,21 +58,28 @@ const Home = () => {
                 onFocus={() => document.getElementById('tools')?.scrollIntoView({ behavior: 'smooth' })}
               />
             </div>
-            <div className="reveal mt-6 flex flex-wrap items-center justify-center gap-2">
-              {popular.map((t) => {
-                const Icon = Icons[t.icon] || Icons.FileText;
-                return (
-                  <button key={t.slug} onClick={() => navigate(`/tool/${t.slug}`)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:border-rose-300 dark:hover:border-rose-500/40 hover:text-rose-500 transition-colors">
-                    <Icon className="w-4 h-4" /> {t.name}
-                  </button>
-                );
-              })}
+            <div className="reveal mt-8">
+              <p className="text-xs font-bold uppercase tracking-widest text-rose-500 mb-4">Most popular tools</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 max-w-3xl mx-auto">
+                {popular.map((t) => {
+                  const Icon = Icons[t.icon] || Icons.FileText;
+                  return (
+                    <button key={t.slug} onClick={() => navigate(`/tool/${t.slug}`)}
+                      className="premium-card group flex flex-col items-center gap-2.5 rounded-2xl px-3 py-5">
+                      <span className={`grid place-items-center w-12 h-12 rounded-xl ${ICON_TILE[t.color] || ICON_TILE.rose} group-hover:scale-110 transition-transform`}>
+                        <Icon className="w-6 h-6" strokeWidth={2} />
+                      </span>
+                      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 group-hover:text-rose-500 transition-colors text-center leading-tight">{t.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
           <div className="reveal mt-14 grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl mx-auto">
             {STATS.map((s) => (
-              <div key={s.label} className="text-center rounded-2xl border border-slate-200 dark:border-white/10 bg-white/60 dark:bg-white/[0.03] py-5">
+              <div key={s.label} className="premium-card text-center rounded-2xl py-6">
                 <div className="font-display font-extrabold text-2xl sm:text-3xl brand-gradient-text">{s.value}</div>
                 <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">{s.label}</div>
               </div>
